@@ -19,29 +19,28 @@ import usersViewRouter from './routes/users.views.router.js';
 const app = express();
 dotenv.config() // Esto es para las variables de entorno
 
-//JSON settings:
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Config HBS
+
 app.engine('handlebars', handlebars.engine());
 app.set('views', __dirname + '/views')
 app.set('view engine', 'handlebars');
 app.use(express.static(__dirname + '/public'));
 
 
-//Cookies
-//router.use(cookieParser());
-app.use(cookieParser("CoderS3cr3tC0d3"));
 
-// COnfiguracion de PASSPORT
-initializePassport() // <- Ejecucioon
+app.use(cookieParser("process.env.COOKIE_SECRET"));
+
+
+initializePassport() /
 app.use(passport.initialize())
 
 
-//Declare routers:
-app.use("/users", usersViewRouter); // <- Es donde esta el perfil de user,  formularios [ForemLogin, FormRegister ]
-app.use("/api/sessions", sessionsRouter); // <- Es donde estan las APIs de register y Login
+
+app.use("/users", usersViewRouter); 
+app.use("/api/sessions", sessionsRouter); // 
 
 
 const SERVER_PORT = process.env.SERVER_PORT
@@ -53,9 +52,9 @@ const urlMongo = process.env.MONGO_URL
 const connectMongoDB = async () => {
     try {
         await mongoose.connect(urlMongo);
-        console.log("Conectado con exito a MongoDB usando Moongose.");
+        console.log("Conexión exitosa con MongoDB usando Mongoose.");
     } catch (error) {
-        console.error("No se pudo conectar a la BD usando Moongose: " + error);
+        console.error("Error al conectar con MongoDB usando Mongoose: " + error);
         process.exit();
     }
 };

@@ -1,0 +1,23 @@
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Administración</title>
+</head>
+<body>
+    <h1>Bienvenido, Administrador</h1>
+
+    <h2>Gestión de Productos</h2>
+    <a href="/admin/products/add">Agregar nuevo producto</a>
+    <div id="product-list">
+        {{#each products}}
+            <div class="product-card">
+                <h3>{{this.title}}</h3>
+                <p>Precio: ${{this.price}}</p>
+                <a href="/admin/products/edit/{{this._id}}">Editar</a>
+                <button onclick="deleteProduct('{{this._id}}')">Eliminar</button>
+            </div>
+        {{/each}}
+    </div>
+</body>
+</html>
