@@ -1,83 +1,100 @@
+// passport.config.js
 import passport from 'passport';
-import passportLocal from 'passport-local';
-import jwtStrategy from 'passport-jwt';
+import { Strategy as LocalStrategy } from 'passport-local';
+import { Strategy as JWTStrategy, ExtractJwt } from 'passport-jwt';
+import UserModel from '../dao/models/user.model.js'; 
+import { createHash, isValidPassword } from '../utils/hashbcryp.js'; 
 
-import userModel from '../models/user.model.js';
-import { createHash, PRIVATE_KEY, cookieExtractor } from '../utils.js'
-
-const localStrategy = passportLocal.Strategy;
-
-const JwtStrategy = jwtStrategy.Strategy;
-const ExtractJWT = jwtStrategy.ExtractJwt;
-
+const JWT_SECRET = 'your-secret-key'; 
 
 const initializePassport = () => {
-
-    passport.use('jwt', new JwtStrategy(
-        {
-            jwtFromRequest: ExtractJWT.fromExtractors([cookieExtractor]),
-            secretOrKey: PRIVATE_KEY
-        }, async (jwt_payload, done) => {
-            console.log("Entrando a la estrategia de Passport con JWT.");
-            try {
-                console.log("JWT obtenido del payload");
-                console.log(jwt_payload);
-                return done(null, jwt_payload.user);
-            } catch (error) {
-                console.error("Error al procesar JWT:", error);
-                return done(error);
-            }
-        }
-    ));
-
-
-    passport.use('register', new localStrategy(
-        { passReqToCallback: true, usernameField: 'email' },
-        async (req, username, password, done) => {
-
-            console.log("Registrando usuario:", username);
-
-            const { first_name, last_name, email, age } = req.body;
-            try {
-                const exists = await userModel.findOne({ email: username });
-                if (exists) {
-                    console.log("El usuario ya existe.");
-                    return done(null, false);
+    // JWT Strategy
+    passport.use('jwt', new JWTStrategy({
+        jwtFromRequest: ExtractJwt.fromExtractors([
+            ExtractJwt.fromAuthHeaderAsBearerToken(),
+            (req) => {
+                let token = null;
+                if (req && req.cookies) {
+                    token = req.cookies['coderCookie'];
                 }
-                const user = {
-                    first_name,
-                    last_name,
-                    username,
-                    age,
-                    password: createHash(password),
-                    loggedBy: "App"
-                };
-                const result = await userModel.create(user);
-
-                return done(null, result);
-            } catch (error) {
-                console.error("Error registrando el usuario:", error);
-                return done("Error registrando el usuario: " + error);
+                return token;
             }
+        ]),
+        secretOrKey: JWT_SECRET
+    }, async (jwt_payload, done) => {
+        try {
+            const user = await UserModel.findById(jwt_payload.sub);
+            if (!user) {
+                return done(null, false, { message: 'Usuario no encontrado' });
+            }
+            return done(null, user);
+        } catch (error) {
+            return done(error, false);
         }
-    ));
+    }));
 
+    // Local Strategy - Register
+    passport.use("register", new LocalStrategy({
+        passReqToCallback: true,
+        usernameField: "email"
+    }, async (req, username, password, done) => {
+        const { first_name, last_name, email, age } = req.body;
+
+        try {
+            let user = await UserModel.findOne({ email });
+            if (user) {
+                return done(null, false, { message: 'El correo electrónico ya está registrado' });
+            }
+
+            let newUser = new UserModel({
+                first_name,
+                last_name,
+                email,
+                age,
+                password: createHash(password) 
+            });
+
+            let result = await newUser.save(); 
+            return done(null, result); 
+        } catch (error) {
+            return done(error);
+        }
+    }));
+
+    // Local Strategy - Login
+    passport.use('login', new LocalStrategy({
+        usernameField: 'email'
+    }, async (email, password, done) => {
+        try {
+            const user = await UserModel.findOne({ email });
+            
+            if (!user) {
+                return done(null, false, { message: 'Usuario no encontrado' });
+            }
+
+            if (!isValidPassword(password, user)) {
+                return done(null, false, { message: 'Contraseña incorrecta' });
+            }
+
+            return done(null, user);
+        } catch (error) {
+            return done(error);
+        }
+    }));
 
     passport.serializeUser((user, done) => {
-        done(null, user._id);
+        done(null, user._id); 
     });
 
     passport.deserializeUser(async (id, done) => {
         try {
-            let user = await userModel.findById(id);
+            const user = await UserModel.findById(id);
             done(null, user);
-        } catch (error) {
-            console.error("Error deserializando el usuario: " + error);
+        } catch (err) {
+            done(err);
         }
     });
+};
 
-}
-
-
-
-export default initializePassport;
+export { JWT_SECRET };
+export default initializePassport; 

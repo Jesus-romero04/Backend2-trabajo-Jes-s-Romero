@@ -1,24 +1,37 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bienvenido - E-commerce</title>
-</head>
-<body>
-    <h1>Bienvenido a nuestra tienda online</h1>
-
-    <h2>Productos disponibles</h2>
-    <div id="featured-products">
-        {{#each featuredProducts}}
-            <div class="product-card">
-                <h3>{{this.title}}</h3>
-                <p>Precio: ${{this.price}}</p>
-                <a href="/products/{{this._id}}">Ver detalles</a>
-            </div>
-        {{/each}}
+<div class="products-container">
+    <h1 class="title">Bienvenido a nuestra tienda</h1>
+    
+    <div class="auth-options" style="display: flex; justify-content: center; gap: 20px; margin-top: 40px;">
+        <a href="/login" style="text-decoration: none;">
+            <button class="submit-btn" style="width: 200px; background-color: #ac8e0c;">
+                Iniciar Sesión
+            </button>
+        </a>
+        
+        <a href="/register" style="text-decoration: none;">
+            <button class="submit-btn" style="width: 200px;">
+                Registrarse
+            </button>
+        </a>
     </div>
 
-    <a href="/products">Ver todos los productos</a>
-</body>
-</html>
+    </div>
+</div>
+
+<style>
+    .auth-options button {
+        transition: transform 0.2s ease, background-color 0.2s ease;
+    }
+    
+    .auth-options button:hover {
+        transform: translateY(-2px);
+    }
+    
+    .feature-card {
+        transition: transform 0.3s ease;
+    }
+    
+    .feature-card:hover {
+        transform: translateY(-5px);
+    }
+</style>
