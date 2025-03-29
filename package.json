@@ -1,5 +1,5 @@
 {
-  "name": "comision70335",
+  "name": "Trabajo ecommerce",
   "version": "0.0.1",
   "description": "proyecto de curso Coderhouse",
   "main": "./src/app.js",
@@ -10,7 +10,7 @@
     "start": "node ./src/app.js",
     "migrate": "node ./src/utils/migrate-fs-to-mongo.js"
   },
-  "author": "Tomas Stabilini",
+  "author": "aa",
   "license": "ISC",
   "dependencies": {
     "bcrypt": "^5.1.1",
