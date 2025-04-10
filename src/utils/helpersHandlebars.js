@@ -1,45 +1,46 @@
 const helpers = {
-  if_gt: function (v1, v2, options) {
-    if (v1 > v2) {
-      return options.fn(this);
+  eq: function (a, b) {
+    return a === b;
+  },
+  gt: function (a, b) {
+    return a > b;
+  },
+  lt: function (a, b) {
+    return a < b;
+  },
+  add: function (a, b) {
+    return a + b;
+  },
+  subtract: function (a, b) {
+    return a - b;
+  },
+  multiply: function (a, b) {
+    return a * b;
+  },
+  formatPrice: function (price) {
+    return new Intl.NumberFormat("es-AR", {
+      style: "currency",
+      currency: "ARS",
+    }).format(price);
+  },
+  range: function (start, end) {
+    const result = [];
+    for (let i = start; i <= end; i++) {
+      result.push(i);
     }
-    return options.inverse(this);
+    return result;
   },
-  add: function (v1, v2) {
-    return parseInt(v1) + parseInt(v2);
+  reduce: function (array, fn) {
+    return array.reduce((acc, currentItem) => {
+      return acc + currentItem.price * currentItem.quantity;
+    }, 0);
   },
-
-  subtract: function (v1, v2) {
-    return parseInt(v1) - parseInt(v2);
+  total: function (products) {
+    return products.reduce((acc, item) => acc + item.price * item.quantity, 0);
   },
-  forPages: function (n, options) {
-    let pages = "";
-    for (let i = 1; i <= n; i++) {
-      pages += `<option value="${i}" ${
-        i === options.data.root.page ? "selected" : ""
-      }>${i} de ${n}</option>`;
-    }
-    return pages;
-  },
-  isSelected: function (value, limit) {
-    return value === limit ? "selected" : "";
-  },
-
-  isSelected: function (value, selected) {
-    if (value === selected) {
-      return "selected";
-    }
-    return "";
-  },
-
-  showProductsByStatus: function (status, products) {
-    if (status === "true") {
-      return products.filter((product) => product.status === true);
-    } else if (status === "false") {
-      return products.filter((product) => product.status === false);
-    } else {
-      return products;
-    }
+  lambda: function (params, body) {
+    const paramList = params.split(",").map((p) => p.trim());
+    return new Function(...paramList, `return ${body}`);
   },
 };
 

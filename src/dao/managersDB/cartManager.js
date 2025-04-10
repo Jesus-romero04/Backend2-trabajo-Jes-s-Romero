@@ -1,158 +1,110 @@
-import Cart from "../models/cartModel.js";
-import Product from "../models/productModel.js";
-import mongoose from "mongoose";
-
-const {
-  Types: { ObjectId },
-} = mongoose;
+import Cart from "../../models/cart.model.js";
+import Ticket from "../../models/ticket.model.js";
 
 class CartManager {
-  constructor() {
-    this.collection = Cart;
-  }
-
-  async createCart(products) {
-    const newCart = { products: [] };
-
-    if (products && Array.isArray(products)) {
-      newCart.products = products.map((item) => ({
-        product: item.product,
-        quantity: item.quantity,
-      }));
-    }
-
-    const result = await this.collection.create(newCart);
-    return { _id: result._id, ...newCart };
-  }
-
-  async getCart(cartId) {
-    return await this.collection.findById(cartId).populate("products.product");
-  }
-
-  async getAllCarts() {
+  async create() {
     try {
-      const carts = await Cart.find().populate("products.product");
-      return carts;
+      const cart = new Cart({ products: [] });
+      await cart.save();
+      return cart.toObject();
     } catch (error) {
       throw error;
     }
   }
 
-  async addProductToCart(cartId, productId) {
-    const cart = await this.getCart(cartId);
-
-    if (!ObjectId.isValid(productId)) {
-      throw new Error(`ID de producto inválido: ${productId}`);
+  async getById(cartId) {
+    try {
+      return await Cart.findById(cartId).populate("products.product").lean();
+    } catch (error) {
+      throw error;
     }
-
-    const productExists = await Product.findById(productId);
-    if (!productExists) {
-      throw new Error(`Producto con ID ${productId} no encontrado.`);
-    }
-
-    const productObjectId = new mongoose.Types.ObjectId(productId);
-
-    const productIndex = cart.products.findIndex((p) =>
-      p.product.equals(productObjectId)
-    );
-
-    if (productIndex !== -1) {
-      cart.products[productIndex].quantity++;
-    } else {
-      cart.products.push({ product: productObjectId, quantity: 1 });
-    }
-
-    await this.collection.updateOne(
-      { _id: new mongoose.Types.ObjectId(cartId) },
-      { $set: { products: cart.products } }
-    );
-    return cart;
   }
 
-  async updateProductsInCart(cartId, products) {
-    const cart = await this.getCart(cartId);
-
-    if (!Array.isArray(products)) {
-      throw new Error("Los productos deben ser un arreglo.");
-    }
-
-    const updatedProducts = products.map((item) => {
-      if (
-        !item.product ||
-        typeof item.quantity !== "number" ||
-        item.quantity <= 0
-      ) {
-        throw new Error(
-          "Cada producto debe tener un ID y una cantidad válida mayor a 0."
-        );
+  async addProduct(cartId, productId, quantity = 1) {
+    try {
+      const cart = await Cart.findOne({ _id: cartId });
+      if (!cart) {
+        throw new Error("Carrito no encontrado");
       }
-      return {
-        product: new mongoose.Types.ObjectId(item.product),
-        quantity: item.quantity,
-      };
-    });
 
-    await this.collection.updateOne(
-      { _id: new mongoose.Types.ObjectId(cartId) },
-      { $set: { products: updatedProducts } }
-    );
+      const existingProduct = cart.products.find(
+        (item) =>
+          item.product._id.toString() === productId ||
+          item.product.toString() === productId
+      );
 
-    return { _id: cartId, products: updatedProducts };
-  }
-
-  async updateProductQuantityInCart(cartId, productId, newQuantity) {
-    const cart = await this.getCart(cartId);
-    const productObjectId = new mongoose.Types.ObjectId(productId);
-
-    const productIndex = cart.products.findIndex((p) =>
-      p.product.equals(productObjectId)
-    );
-
-    if (productIndex !== -1) {
-      if (newQuantity > 0) {
-        cart.products[productIndex].quantity = newQuantity;
+      if (existingProduct) {
+        existingProduct.quantity += quantity;
       } else {
-        throw new Error("La cantidad debe ser mayor a 0");
+        cart.products.push({ product: productId, quantity });
       }
 
-      await this.collection.updateOne(
-        { _id: new mongoose.Types.ObjectId(cartId) },
-        { $set: { products: cart.products } }
-      );
-      return cart;
-    } else {
-      throw new Error(`Producto no encontrado en el carrito ${cartId}`);
+      await cart.save();
+      return (await cart.populate("products.product")).toObject();
+    } catch (error) {
+      throw error;
     }
   }
 
-  async clearProductsInCart(cartId) {
-    await this.collection.updateOne(
-      { _id: new mongoose.Types.ObjectId(cartId) },
-      { $set: { products: [] } }
-    );
-    return { message: "Productos eliminados del carrito" };
+  async removeProduct(cartId, productId) {
+    try {
+      const cart = await Cart.findByIdAndUpdate(
+        cartId,
+        { $pull: { products: { product: productId } } },
+        { new: true }
+      ).lean();
+      return cart;
+    } catch (error) {
+      throw error;
+    }
   }
 
-  async removeProductFromCart(cartId, productId) {
-    const cart = await this.getCart(cartId);
+  async updateCart(cartId, products) {
+    try {
+      const cart = await Cart.findById(cartId);
+      if (!cart) {
+        throw new Error("Carrito no encontrado");
+      }
 
-    if (!ObjectId.isValid(productId)) {
-      throw new Error("ID inválido para el producto.");
+      cart.products = products;
+      await cart.save();
+      return cart.toObject();
+    } catch (error) {
+      console.error("Error al actualizar carrito:", error);
+      throw error;
     }
+  }
 
-    const productIndex = cart.products.findIndex((p) =>
-      p.product.equals(new ObjectId(productId))
-    );
+  async clearCart(cartId) {
+    try {
+      const cart = await Cart.findById(cartId);
+      if (!cart) {
+        throw new Error("Carrito no encontrado");
+      }
 
-    if (productIndex !== -1) {
-      cart.products.splice(productIndex, 1);
-      await this.collection.updateOne(
-        { _id: new ObjectId(cartId) },
-        { $set: { products: cart.products } }
-      );
-      return cart;
-    } else {
-      throw new Error(`Producto no encontrado en el carrito ${cartId}`);
+      cart.products = [];
+      return await cart.save();
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async createTicket(ticketData) {
+    try {
+      if (!ticketData.amount || !ticketData.purchaser) {
+        throw new Error("Datos de ticket inválidos");
+      }
+
+      const ticket = new Ticket({
+        amount: ticketData.amount,
+        purchaser: ticketData.purchaser
+      });
+
+      await ticket.save();
+      return ticket.toObject();
+    } catch (error) {
+      console.error("Error al crear ticket:", error);
+      throw error;
     }
   }
 }

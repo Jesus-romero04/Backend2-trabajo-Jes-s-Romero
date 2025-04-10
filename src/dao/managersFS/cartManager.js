@@ -1,148 +1,110 @@
-import fs from "fs";
-import path from "path";
+import fs from "fs/promises";
 import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import { v4 as uuidv4 } from "uuid";
 
 const __filename = fileURLToPath(import.meta.url);
-
-const __dirname = path.dirname(__filename);
-
-const cartsFilePath = path.join(__dirname, "../../data/carts.json");
+const __dirname = dirname(__filename);
 
 class CartFileManager {
   constructor() {
-    this.carts = [];
-    this.loadCarts();
+    this.path = join(__dirname, "../../../data/carts.json");
+    this.initializeFile();
   }
 
-  loadCarts() {
-    if (fs.existsSync(cartsFilePath)) {
-      const data = fs.readFileSync(cartsFilePath, "utf-8");
-      this.carts = JSON.parse(data);
+  async initializeFile() {
+    try {
+      await fs.access(this.path);
+    } catch {
+      await fs.mkdir(dirname(this.path), { recursive: true });
+      await fs.writeFile(this.path, "[]");
     }
   }
 
-  saveCarts() {
-    fs.writeFileSync(cartsFilePath, JSON.stringify(this.carts, null, 2));
+  async getAll() {
+    const data = await fs.readFile(this.path, "utf-8");
+    return JSON.parse(data);
   }
 
-  createCart(products) {
-    const newCart = { id: this.carts.length + 1, products: [] };
-    if (products && Array.isArray(products)) {
-      newCart.products = products.map((item) => ({
-        product: item.product,
-        quantity: item.quantity,
-      }));
-    }
-    this.carts.push(newCart);
-    this.saveCarts();
+  async create() {
+    const carts = await this.getAll();
+    const newCart = {
+      id: uuidv4(),
+      products: [],
+      createdAt: new Date(),
+    };
+    carts.push(newCart);
+    await fs.writeFile(this.path, JSON.stringify(carts, null, 2));
     return newCart;
   }
 
-  getCart(cartId) {
-    return this.carts.find((cart) => cart.id === cartId);
+  async getById(cartId) {
+    const carts = await this.getAll();
+    return carts.find((cart) => cart.id === cartId);
   }
 
-  getAllCarts() {
-    return this.carts;
-  }
+  async addProduct(cartId, productId, quantity = 1) {
+    const carts = await this.getAll();
+    const cartIndex = carts.findIndex((cart) => cart.id === cartId);
 
-  addProductToCart(cartId, productId) {
-    const cart = this.getCart(cartId);
-    if (!cart) throw new Error("Carrito no encontrado");
-
-    const productIndex = cart.products.findIndex(
-      (p) => p.product === productId
-    );
-    if (productIndex !== -1) {
-      cart.products[productIndex].quantity++;
-    } else {
-      cart.products.push({ product: productId, quantity: 1 });
+    if (cartIndex === -1) {
+      throw new Error("Carrito no encontrado");
     }
 
-    this.saveCarts();
+    const cart = carts[cartIndex];
+    const productIndex = cart.products.findIndex(
+      (item) => item.product === productId
+    );
 
+    if (productIndex === -1) {
+      cart.products.push({ product: productId, quantity });
+    } else {
+      cart.products[productIndex].quantity += quantity;
+    }
+
+    cart.updatedAt = new Date();
+    await fs.writeFile(this.path, JSON.stringify(carts, null, 2));
     return cart;
   }
 
-  updateProductsInCart(cartId, products) {
-    const cart = this.getCart(cartId);
-    if (!cart) throw new Error("Carrito no encontrado");
+  async removeProduct(cartId, productId) {
+    const carts = await this.getAll();
+    const cartIndex = carts.findIndex((cart) => cart.id === cartId);
 
-    if (!Array.isArray(products)) {
-      throw new Error("Los productos deben ser un arreglo.");
-    }
+    if (cartIndex === -1) return null;
 
-    const updatedProducts = products.map((item) => {
-      if (
-        !item.product ||
-        typeof item.quantity !== "number" ||
-        item.quantity <= 0
-      ) {
-        throw new Error(
-          "Cada producto debe tener un ID y una cantidad válida mayor a 0."
-        );
-      }
-      return { product: item.product, quantity: item.quantity };
-    });
+    const cart = carts[cartIndex];
+    cart.products = cart.products.filter((item) => item.product !== productId);
+    cart.updatedAt = new Date();
 
-    cart.products = updatedProducts;
-    this.saveCarts();
-
-    return { id: cartId, products: updatedProducts };
+    await fs.writeFile(this.path, JSON.stringify(carts, null, 2));
+    return cart;
   }
 
-  updateProductQuantityInCart(cartId, productId, newQuantity) {
-    const cart = this.getCart(cartId);
-    if (!cart) throw new Error("Carrito no encontrado");
+  async updateCart(cartId, products) {
+    const carts = await this.getAll();
+    const cartIndex = carts.findIndex((cart) => cart.id === cartId);
 
-    const productIndex = cart.products.findIndex(
-      (p) => p.product === productId
-    );
+    if (cartIndex === -1) return null;
 
-    if (productIndex !== -1) {
-      if (newQuantity > 0) {
-        cart.products[productIndex].quantity = newQuantity;
-      } else {
-        throw new Error("La cantidad debe ser mayor a 0");
-      }
+    carts[cartIndex].products = products;
+    carts[cartIndex].updatedAt = new Date();
 
-      this.saveCarts();
-      return cart;
-    } else {
-      throw new Error(`Producto no encontrado en el carrito ${cartId}`);
-    }
+    await fs.writeFile(this.path, JSON.stringify(carts, null, 2));
+    return carts[cartIndex];
   }
 
-  clearProductsInCart(cartId) {
-    const cart = this.getCart(cartId);
+  async clearCart(cartId) {
+    const carts = await this.getAll();
+    const cartIndex = carts.findIndex((cart) => cart.id === cartId);
 
-    if (!cart) throw new Error("Carrito no encontrado");
+    if (cartIndex === -1) return null;
 
-    cart.products = [];
-    this.saveCarts();
+    carts[cartIndex].products = [];
+    carts[cartIndex].updatedAt = new Date();
 
-    return { message: "Productos eliminados del carrito" };
-  }
-
-  async removeProductFromCart(cartId, productId) {
-    const numericCartId = Number(cartId);
-    const cart = await this.getCart(numericCartId);
-
-    if (!cart) throw new Error("Carrito no encontrado");
-
-    const numericProductId = Number(productId);
-
-    const productIndex = cart.products.findIndex(
-      (p) => p.product === numericProductId
-    );
-
-    if (productIndex !== -1) {
-      cart.products.splice(productIndex, 1);
-      await this.saveCarts();
-      return cart;
-    } else {
-      throw new Error(`Producto no encontrado en el carrito ${cartId}`);
-    }
+    await fs.writeFile(this.path, JSON.stringify(carts, null, 2));
+    return carts[cartIndex];
   }
 }
 

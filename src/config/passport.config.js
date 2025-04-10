@@ -1,100 +1,120 @@
-// passport.config.js
-import passport from 'passport';
-import { Strategy as LocalStrategy } from 'passport-local';
-import { Strategy as JWTStrategy, ExtractJwt } from 'passport-jwt';
-import UserModel from '../dao/models/user.model.js'; 
-import { createHash, isValidPassword } from '../utils/hashbcryp.js'; 
+import passport from "passport";
+import local from "passport-local";
+import jwt from "passport-jwt";
+import bcrypt from "bcrypt";
+import { userRepository, cartRepository } from "../repositories/index.js";
+import config from "./config.js";
 
-const JWT_SECRET = 'your-secret-key'; 
+const LocalStrategy = local.Strategy;
+const JWTStrategy = jwt.Strategy;
+const ExtractJWT = jwt.ExtractJwt;
 
 const initializePassport = () => {
-    // JWT Strategy
-    passport.use('jwt', new JWTStrategy({
-        jwtFromRequest: ExtractJwt.fromExtractors([
-            ExtractJwt.fromAuthHeaderAsBearerToken(),
-            (req) => {
-                let token = null;
-                if (req && req.cookies) {
-                    token = req.cookies['coderCookie'];
-                }
-                return token;
-            }
-        ]),
-        secretOrKey: JWT_SECRET
-    }, async (jwt_payload, done) => {
-        try {
-            const user = await UserModel.findById(jwt_payload.sub);
-            if (!user) {
-                return done(null, false, { message: 'Usuario no encontrado' });
-            }
-            return done(null, user);
-        } catch (error) {
-            return done(error, false);
-        }
-    }));
-
-    // Local Strategy - Register
-    passport.use("register", new LocalStrategy({
+  passport.use(
+    "register",
+    new LocalStrategy(
+      {
+        usernameField: "email",
+        passwordField: "password",
         passReqToCallback: true,
-        usernameField: "email"
-    }, async (req, username, password, done) => {
-        const { first_name, last_name, email, age } = req.body;
-
+      },
+      async (req, email, password, done) => {
         try {
-            let user = await UserModel.findOne({ email });
-            if (user) {
-                return done(null, false, { message: 'El correo electrónico ya está registrado' });
-            }
-
-            let newUser = new UserModel({
-                first_name,
-                last_name,
-                email,
-                age,
-                password: createHash(password) 
+          const existingUser = await userRepository.getByEmail(email);
+          if (existingUser) {
+            return done(null, false, {
+              message: "El correo electrónico ya está registrado",
             });
+          }
 
-            let result = await newUser.save(); 
-            return done(null, result); 
+          const hashedPassword = await bcrypt.hash(password, 10);
+          const cart = await cartRepository.create();
+
+          const userData = {
+            ...req.body,
+            password: hashedPassword,
+            cart: cart.id,
+          };
+
+          const newUser = await userRepository.create(userData);
+          done(null, newUser);
         } catch (error) {
-            return done(error);
+          done(error);
         }
-    }));
+      }
+    )
+  );
 
-    // Local Strategy - Login
-    passport.use('login', new LocalStrategy({
-        usernameField: 'email'
-    }, async (email, password, done) => {
+  passport.use(
+    "login",
+    new LocalStrategy(
+      {
+        usernameField: "email",
+        passwordField: "password",
+      },
+      async (email, password, done) => {
         try {
-            const user = await UserModel.findOne({ email });
-            
-            if (!user) {
-                return done(null, false, { message: 'Usuario no encontrado' });
-            }
+          const user = await userRepository.getByEmail(email);
 
-            if (!isValidPassword(password, user)) {
-                return done(null, false, { message: 'Contraseña incorrecta' });
-            }
+          if (!user) {
+            return done(null, false, {
+              message: "Usuario no encontrado",
+            });
+          }
 
-            return done(null, user);
+          const isValidPassword = await bcrypt.compare(password, user.password);
+          if (!isValidPassword) {
+            return done(null, false, {
+              message: "Contraseña incorrecta",
+            });
+          }
+
+          return done(null, user);
         } catch (error) {
-            return done(error);
+          return done(error);
         }
-    }));
+      }
+    )
+  );
 
-    passport.serializeUser((user, done) => {
-        done(null, user._id); 
-    });
-
-    passport.deserializeUser(async (id, done) => {
+  passport.use(
+    "jwt",
+    new JWTStrategy(
+      {
+        jwtFromRequest: ExtractJWT.fromExtractors([
+          ExtractJWT.fromAuthHeaderAsBearerToken(),
+          (req) => req.cookies.jwt,
+        ]),
+        secretOrKey: config.jwt.secret,
+      },
+      async (jwtPayload, done) => {
         try {
-            const user = await UserModel.findById(id);
-            done(null, user);
-        } catch (err) {
-            done(err);
+          const user = await userRepository.getById(jwtPayload.id);
+          if (!user) {
+            return done(null, false, {
+              message: "No se encontró el usuario asociado al token",
+            });
+          }
+          return done(null, user);
+        } catch (error) {
+          return done(error);
         }
-    });
+      }
+    )
+  );
+
+  passport.serializeUser((user, done) => {
+    done(null, user.id);
+  });
+
+  passport.deserializeUser(async (id, done) => {
+    try {
+      const user = await userRepository.getById(id);
+      done(null, user);
+    } catch (error) {
+      done(error);
+    }
+  });
 };
 
-export { JWT_SECRET };
-export default initializePassport; 
+export default initializePassport;

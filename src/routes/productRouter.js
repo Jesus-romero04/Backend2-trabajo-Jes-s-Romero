@@ -1,305 +1,112 @@
 import express from "express";
-import { ObjectId } from "mongodb";
-import ProductManager from "../dao/managersDB/productManager.js";
-import ProductFileManager from "../dao/managersFS/productManager.js";
+import {
+  checkRole,
+  checkProductPermissions,
+  ROLES,
+} from "../middlewares/auth.js";
+import { productRepository } from "../repositories/index.js";
+import { ValidationError, NotFoundError } from "../utils/errorHandler.js";
 
-const productRouter = (useMongoDB = true) => {
+const productRouter = () => {
   const router = express.Router();
-  const productManager = useMongoDB
-    ? new ProductManager()
-    : new ProductFileManager();
 
-  router.get("/", async (req, res) => {
+  router.use((req, res, next) => {
+    res.set("Content-Type", "application/json");
+    res.set("Access-Control-Allow-Origin", "*");
+    next();
+  });
+
+  router.get("/", async (req, res, next) => {
     try {
-      let products = await productManager.getAllProducts();
-      const category = req.query.category;
-      const stock = req.query.stock;
-      const page = req.query.page ? parseInt(req.query.page) : 1;
-      const limit = req.query.limit ? parseInt(req.query.limit) : 10;
+      const { page = 1, limit = 10, sort, query, category } = req.query;
 
-      if (isNaN(page) || page < 1) {
-        return res.status(400).json({ error: "Número de página inválido" });
+      let filter = {};
+      if (query) {
+        filter.$or = [
+          { title: { $regex: query, $options: "i" } },
+          { description: { $regex: query, $options: "i" } },
+        ];
       }
-
-      if (isNaN(limit) || limit < 1 || limit > 100) {
-        return res.status(400).json({ error: "Límite de productos inválido" });
-      }
-
       if (category) {
-        const normalizedCategory = category
-          .toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "");
-        products = products.filter((product) =>
-          product.category.toLowerCase().includes(normalizedCategory)
-        );
-        if (products.length === 0) {
-          return res
-            .status(404)
-            .json({
-              message: `No se encontraron productos con la categoría '${category}'`,
-            });
-        }
+        filter.category = category;
       }
 
-      if (stock === "true") {
-        products = products.filter((product) => product.stock > 0);
-      } else if (stock === "false") {
-        products = products.filter((product) => product.stock === 0);
-      }
-
-      const startIndex = (page - 1) * limit;
-      const endIndex = startIndex + limit;
-      const paginatedProducts = products.slice(startIndex, endIndex);
-
-      const totalPages = Math.ceil(products.length / limit);
-      const hasPrevPage = page > 1;
-      const hasNextPage = page < totalPages;
-
-      const response = {
-        status: "success",
-        payload: paginatedProducts,
-        totalPages,
-        page,
-        hasPrevPage,
-        hasNextPage,
-        prevLink: hasPrevPage ? `?page=${page - 1}&limit=${limit}` : null,
-        nextLink: hasNextPage ? `?page=${page + 1}&limit=${limit}` : null,
+      const options = {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        sort: sort ? { price: sort === "asc" ? 1 : -1 } : undefined,
+        filter,
       };
 
-      res.json(response);
+      const products = await productRepository.getAll(options);
+      res.json({ status: "success", data: products });
     } catch (error) {
-      console.error(error);
-      res
-        .status(500)
-        .json({ status: "error", message: "Error al obtener productos" });
+      next(error);
     }
   });
 
-  router.get("/:pid", async (req, res) => {
+  router.get("/:id", async (req, res, next) => {
     try {
-      const productId = req.params.pid;
-
-      const id = String(productId);
-
-      if (useMongoDB && !ObjectId.isValid(id)) {
-        return res
-          .status(400)
-          .json({
-            status: "error",
-            message:
-              "ID inválido. Debe ser una cadena hexadecimal de 24 caracteres.",
-          });
-      }
-
-      const finalId = useMongoDB ? ObjectId.createFromHexString(id) : id;
-
-      const product = await productManager.getProductById(finalId);
-
+      const product = await productRepository.getById(req.params.id);
       if (!product) {
-        return res
-          .status(404)
-          .json({
-            status: "error",
-            message: `Producto con ID ${productId} no encontrado`,
-          });
+        throw new NotFoundError("Producto no encontrado");
       }
-
-      res.json({ status: "success", payload: product });
+      res.json({ status: "success", data: product });
     } catch (error) {
-      console.error("Error al obtener producto:", error);
-
-      if (error.message.startsWith("Producto no encontrado")) {
-        return res
-          .status(404)
-          .json({ status: "error", message: error.message });
-      }
-
-      res
-        .status(500)
-        .json({ status: "error", message: "Error interno del servidor" });
+      next(error);
     }
   });
 
-  router.put("/:pid", async (req, res) => {
-    const productId = req.params.pid;
-
-    const id = String(productId);
-
-    if (useMongoDB && !ObjectId.isValid(id)) {
-      return res
-        .status(400)
-        .json({
-          status: "error",
-          message:
-            "ID inválido. Debe ser una cadena hexadecimal de 24 caracteres.",
-        });
-    }
-
-    const finalId = useMongoDB ? ObjectId.createFromHexString(id) : id;
-
-    try {
-      const updatedProduct = await productManager.updateProduct(
-        finalId,
-        req.body
-      );
-
-      res.json({ status: "success", payload: updatedProduct });
-    } catch (error) {
-      if (error.message.startsWith("Producto no encontrado")) {
-        return res
-          .status(404)
-          .json({ status: "error", message: error.message });
-      }
-
-      res.status(400).json({ status: "error", message: error.message });
-    }
-  });
-
-  router.post("/", async (req, res) => {
-    try {
-      const requiredLabels = [
-        "title",
-        "description",
-        "code",
-        "price",
-        "status",
-        "stock",
-        "category",
-      ];
-
-      for (const label of requiredLabels) {
-        if (!req.body[label]) {
-          return res
-            .status(400)
-            .json({
-              status: "error",
-              message: `El campo ${label} es requerido`,
-            });
+  router.post(
+    "/",
+    checkRole([ROLES.ADMIN]),
+    checkProductPermissions,
+    async (req, res, next) => {
+      try {
+        if (!req.body.title || !req.body.price) {
+          throw new ValidationError("Título y precio son requeridos");
         }
+        const product = await productRepository.create(req.body);
+        res.status(201).json({ status: "success", data: product });
+      } catch (error) {
+        next(error);
       }
-
-      if (typeof req.body.title !== "string") {
-        return res
-          .status(400)
-          .json({ status: "error", message: "El título debe ser un string" });
-      }
-      if (typeof req.body.description !== "string") {
-        return res
-          .status(400)
-          .json({
-            status: "error",
-            message: "La descripción debe ser un string",
-          });
-      }
-      if (typeof req.body.code !== "string") {
-        return res
-          .status(400)
-          .json({ status: "error", message: "El código debe ser un string" });
-      }
-      if (typeof req.body.price !== "number" || req.body.price <= 0) {
-        return res
-          .status(400)
-          .json({
-            status: "error",
-            message: "El precio debe ser un número positivo",
-          });
-      }
-      if (typeof req.body.status !== "boolean") {
-        return res
-          .status(400)
-          .json({
-            status: "error",
-            message: "El estado (status) debe ser un valor booleano",
-          });
-      }
-
-      if (typeof req.body.stock !== "number") {
-        return res
-          .status(400)
-          .json({
-            status: "error",
-            message: "El campo stock debe ser un número",
-          });
-      }
-
-      if (!Number.isInteger(req.body.stock) || req.body.stock < 0) {
-        return res
-          .status(400)
-          .json({
-            status: "error",
-            message: "El stock debe ser un número entero no negativo",
-          });
-      }
-
-      if (typeof req.body.category !== "string") {
-        return res
-          .status(400)
-          .json({
-            status: "error",
-            message: "La categoría debe ser un string",
-          });
-      }
-
-      const result = await productManager.addProduct(req.body);
-
-      res.status(201).json({ status: "success", payload: result });
-    } catch (error) {
-      if (error.message.startsWith("Ya existe un producto con el código")) {
-        return res
-          .status(400)
-          .json({ status: "error", message: error.message });
-      }
-
-      if (error.message.startsWith("No se puede agregar")) {
-        return res
-          .status(404)
-          .json({ status: "error", message: error.message });
-      }
-
-      res
-        .status(500)
-        .json({ status: "error", message: "Error al crear producto" });
     }
-  });
+  );
 
-  router.delete("/:pid", async (req, res) => {
-    try {
-      const productId = req.params.pid;
-
-      const id = String(productId);
-
-      if (useMongoDB && !ObjectId.isValid(id)) {
-        return res
-          .status(400)
-          .json({
-            status: "error",
-            message:
-              "ID inválido. Debe ser una cadena hexadecimal de 24 caracteres.",
-          });
+  router.put(
+    "/:id",
+    checkRole([ROLES.ADMIN]),
+    checkProductPermissions,
+    async (req, res, next) => {
+      try {
+        const product = await productRepository.update(req.params.id, req.body);
+        if (!product) {
+          throw new NotFoundError("Producto no encontrado");
+        }
+        res.json({ status: "success", data: product });
+      } catch (error) {
+        next(error);
       }
-
-      const finalId = useMongoDB ? ObjectId.createFromHexString(id) : id;
-
-      await productManager.deleteProduct(finalId);
-
-      res
-        .status(200)
-        .json({ status: "success", message: "Producto eliminado con éxito" });
-    } catch (error) {
-      if (
-        error.message.startsWith("No se puede eliminar. Producto no encontrado")
-      ) {
-        return res
-          .status(404)
-          .json({ status: "error", message: error.message });
-      }
-
-      res
-        .status(500)
-        .json({ status: "error", message: "Error al eliminar producto" });
     }
-  });
+  );
+
+  router.delete(
+    "/:id",
+    checkRole([ROLES.ADMIN]),
+    checkProductPermissions,
+    async (req, res, next) => {
+      try {
+        const result = await productRepository.delete(req.params.id);
+        if (!result) {
+          throw new NotFoundError("Producto no encontrado");
+        }
+        res.json({ status: "success", message: "Producto eliminado" });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
 
   return router;
 };

@@ -1,223 +1,104 @@
-import fs from "fs";
-import path from "path";
+import fs from "fs/promises";
 import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import { v4 as uuidv4 } from "uuid";
 
 const __filename = fileURLToPath(import.meta.url);
-
-const __dirname = path.dirname(__filename);
-
-const productsFilePath = path.join(__dirname, "../../data/products.json");
+const __dirname = dirname(__filename);
 
 class ProductFileManager {
   constructor() {
-    this.products = [];
-    this.loadProducts();
+    this.path = join(__dirname, "../../../data/products.json");
+    this.initializeFile();
   }
 
-  loadProducts() {
-    if (fs.existsSync(productsFilePath)) {
-      const data = fs.readFileSync(productsFilePath, "utf-8");
-      this.products = JSON.parse(data);
+  async initializeFile() {
+    try {
+      await fs.access(this.path);
+    } catch {
+      await fs.mkdir(dirname(this.path), { recursive: true });
+      await fs.writeFile(this.path, "[]");
     }
   }
 
-  saveProducts() {
-    fs.writeFileSync(productsFilePath, JSON.stringify(this.products, null, 2));
-  }
+  async getAll({ filter = {}, sort = {}, page = 1, limit = 10 } = {}) {
+    const data = await fs.readFile(this.path, "utf-8");
+    let products = JSON.parse(data);
 
-  getAllProducts() {
-    return this.products;
-  }
-
-  getProductById(id) {
-    const numericId = Number(id);
-
-    const product = this.products.find((p) => p.id === numericId);
-    return product || null;
-  }
-
-  addProduct(productData) {
-    const requiredLabels = [
-      "title",
-      "description",
-      "code",
-      "price",
-      "status",
-      "stock",
-      "category",
-    ];
-
-    const missingLabels = requiredLabels.filter(
-      (label) => !(label in productData)
-    );
-    if (missingLabels.length > 0) {
-      throw new Error(
-        `Faltan los siguientes campos requeridos: ${missingLabels.join(", ")}`
-      );
+    if (filter.title) {
+      const regex = new RegExp(filter.title, "i");
+      products = products.filter((p) => regex.test(p.title));
+    }
+    if (filter.category) {
+      products = products.filter((p) => p.category === filter.category);
     }
 
-    const existingProduct = this.products.find(
-      (p) => p.code === productData.code
-    );
-    if (existingProduct) {
-      throw new Error(
-        `Ya existe un producto con el código ${productData.code}`
-      );
+    if (sort.price) {
+      products.sort((a, b) => {
+        return sort.price === "asc" ? a.price - b.price : b.price - a.price;
+      });
     }
 
-    const newProduct = {
-      id: this.products.length + 1,
-      ...productData,
+    const totalDocs = products.length;
+    const totalPages = Math.ceil(totalDocs / limit);
+    const skip = (page - 1) * limit;
+    products = products.slice(skip, skip + limit);
+
+    return {
+      docs: products,
+      totalDocs,
+      limit,
+      totalPages,
+      page,
+      hasPrevPage: page > 1,
+      hasNextPage: page < totalPages,
+      prevPage: page > 1 ? page - 1 : null,
+      nextPage: page < totalPages ? page + 1 : null,
     };
+  }
 
-    this.products.push(newProduct);
-    this.saveProducts();
+  async getById(id) {
+    const products = await this.getAll();
+    return products.docs.find((product) => product.id === id);
+  }
+
+  async create(productData) {
+    const products = await this.getAll();
+    const newProduct = {
+      id: uuidv4(),
+      ...productData,
+      createdAt: new Date(),
+    };
+    products.docs.push(newProduct);
+    await fs.writeFile(this.path, JSON.stringify(products.docs, null, 2));
     return newProduct;
   }
 
-  updateProduct(id, updates) {
-    if (updates.id !== undefined) {
-      throw new Error("No se permite actualizar el ID del producto");
-    }
+  async update(id, productData) {
+    const products = await this.getAll();
+    const index = products.docs.findIndex((product) => product.id === id);
 
-    const numericId = Number(id);
-    const productIndex = this.products.findIndex(
-      (product) => product.id === numericId
-    );
+    if (index === -1) return null;
 
-    if (productIndex === -1) {
-      throw new Error(
-        `No se puede actualizar. Producto no encontrado con ID ${id}`
-      );
-    }
-
-    const allowedFields = [
-      "title",
-      "description",
-      "code",
-      "price",
-      "status",
-      "stock",
-      "category",
-      "thumbnails",
-    ];
-
-    const unknownFields = Object.keys(updates).filter(
-      (field) => !allowedFields.includes(field)
-    );
-    if (unknownFields.length > 0) {
-      throw new Error(
-        `No se permiten los siguientes campos: ${unknownFields.join(", ")}`
-      );
-    }
-
-    const filteredUpdates = {};
-    for (const field of allowedFields) {
-      if (updates[field] !== undefined) {
-        filteredUpdates[field] = updates[field];
-      }
-    }
-
-    if (
-      filteredUpdates.title !== undefined &&
-      typeof filteredUpdates.title !== "string"
-    ) {
-      throw new Error("El campo title debe ser un string");
-    }
-
-    if (
-      filteredUpdates.description !== undefined &&
-      typeof filteredUpdates.description !== "string"
-    ) {
-      throw new Error("El campo description debe ser un string");
-    }
-
-    if (filteredUpdates.price !== undefined) {
-      if (
-        typeof filteredUpdates.price !== "number" ||
-        filteredUpdates.price <= 0
-      ) {
-        throw new Error("El campo price debe ser un número positivo");
-      }
-    }
-
-    if (filteredUpdates.stock !== undefined) {
-      if (
-        typeof filteredUpdates.stock !== "number" ||
-        filteredUpdates.stock < 0
-      ) {
-        throw new Error("El campo stock debe ser un número 0 o positivo");
-      }
-    }
-
-    if (
-      filteredUpdates.category !== undefined &&
-      typeof filteredUpdates.category !== "string"
-    ) {
-      throw new Error("El campo category debe ser un string");
-    }
-
-    if (
-      filteredUpdates.status !== undefined &&
-      typeof filteredUpdates.status !== "boolean"
-    ) {
-      throw new Error("El campo status debe ser un booleano (true o false)");
-    }
-
-    if (filteredUpdates.thumbnails !== undefined) {
-      if (!Array.isArray(filteredUpdates.thumbnails)) {
-        throw new Error(
-          "El campo thumbnails debe ser un arreglo vacío o de strings"
-        );
-      }
-
-      if (
-        filteredUpdates.thumbnails.length > 0 &&
-        !filteredUpdates.thumbnails.every(
-          (thumbnail) => typeof thumbnail === "string"
-        )
-      ) {
-        throw new Error("El campo thumbnails solo puede contener strings");
-      }
-    }
-
-    if (filteredUpdates.code !== undefined) {
-      if (typeof filteredUpdates.code !== "string") {
-        throw new Error("El campo code debe ser un string");
-      }
-
-      if (
-        this.products.some(
-          (p) => p.code === filteredUpdates.code && p.id !== numericId
-        )
-      ) {
-        throw new Error(
-          `Ya existe un producto con el código ${filteredUpdates.code}`
-        );
-      }
-    }
-
-    this.products[productIndex] = {
-      ...this.products[productIndex],
-      ...filteredUpdates,
+    products.docs[index] = {
+      ...products.docs[index],
+      ...productData,
+      updatedAt: new Date(),
     };
 
-    this.saveProducts();
-    return this.products[productIndex];
+    await fs.writeFile(this.path, JSON.stringify(products.docs, null, 2));
+    return products.docs[index];
   }
 
-  deleteProduct(id) {
-    const numericId = Number(id);
-    const productIndex = this.products.findIndex((p) => p.id === numericId);
+  async delete(id) {
+    const products = await this.getAll();
+    const index = products.docs.findIndex((product) => product.id === id);
 
-    if (productIndex === -1) {
-      throw new Error("No se puede eliminar. Producto no encontrado");
-    }
+    if (index === -1) return null;
 
-    this.products.splice(productIndex, 1);
-    this.saveProducts();
-
-    return { message: `Producto con ID ${numericId} eliminado` };
+    const deletedProduct = products.docs.splice(index, 1)[0];
+    await fs.writeFile(this.path, JSON.stringify(products.docs, null, 2));
+    return deletedProduct;
   }
 }
 
